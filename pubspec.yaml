@@ -33,6 +33,10 @@ dependencies:
   file_picker: ^8.1.2
   share_plus: ^10.0.2
 
+  # ✅ PARTE 6: Generar PDF + Vista previa/Impresión
+  pdf: ^3.10.8
+  printing: ^5.13.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

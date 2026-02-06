@@ -33,8 +33,13 @@ class SalesService {
       'closedAt': null,
       'total': 0.0,
       'profit': 0.0,
-      // ✅ PARTE 5: se define cuando se cierre la venta
-      'paymentMethod': null, // 'cash' | 'card' | 'virtual'
+      'subtotal': 0.0,
+      'discount': 0.0,
+      'tip': 0.0,
+      'taxRate': 0.0,
+      'taxAmount': 0.0,
+      'paymentMethod': 'cash',
+      'invoiceNo': null,
     });
   }
 
@@ -97,7 +102,6 @@ class SalesService {
     final db = await AppDb.get();
 
     await db.transaction((txn) async {
-      // 1) leer producto
       final prodRows = await txn.query(
         'products',
         where: 'id = ?',
@@ -109,7 +113,6 @@ class SalesService {
       final unitPrice = (p['salePrice'] as num?)?.toDouble() ?? 0;
       final unitCost = (p['costPrice'] as num?)?.toDouble() ?? 0;
 
-      // 2) ver si ya existe el item
       final itemRows = await txn.query(
         'order_items',
         where: 'orderId = ? AND productId = ?',
@@ -186,17 +189,17 @@ class SalesService {
     });
   }
 
-  /// ✅ PARTE 5: se recibe el método de pago y se guarda en orders.paymentMethod
-  /// paymentMethod: 'cash' | 'card' | 'virtual'
   Future<void> closeOrder({
     required int userId,
     required int orderId,
-    required String paymentMethod,
+    required String paymentMethod, // cash|card|virtual
+    required double discount,
+    required double tip,
+    required double taxRate, // %
   }) async {
     final db = await AppDb.get();
 
     await db.transaction((txn) async {
-      // Validar orden abierta
       final oRows = await txn.query(
         'orders',
         where: 'id = ? AND userId = ? AND status = ?',
@@ -204,12 +207,6 @@ class SalesService {
         limit: 1,
       );
       if (oRows.isEmpty) return;
-
-      // Validar método
-      final pm = paymentMethod.trim();
-      if (pm != 'cash' && pm != 'card' && pm != 'virtual') {
-        throw Exception('Método de pago inválido');
-      }
 
       final items = await txn.query(
         'order_items',
@@ -220,7 +217,7 @@ class SalesService {
         throw Exception('No puedes cerrar una venta sin productos');
       }
 
-      // Descontar inventario
+      // 1) Descontar inventario
       for (final it in items) {
         final productId = it['productId'] as int;
         final qty = (it['qty'] as num).toDouble();
@@ -234,25 +231,79 @@ class SalesService {
         if (pRows.isEmpty) continue;
 
         final currentStock = (pRows.first['stockQty'] as num?)?.toDouble() ?? 0;
-        final newStock = currentStock - qty;
-
         await txn.update(
           'products',
-          {'stockQty': newStock},
+          {'stockQty': currentStock - qty},
           where: 'id = ?',
           whereArgs: [productId],
         );
       }
 
-      await _recalcOrder(txn, orderId);
+      // 2) Recalcular subtotal y ganancia base (items)
+      final sums = await txn.rawQuery(
+        '''
+        SELECT 
+          COALESCE(SUM(lineTotal), 0) as subtotal,
+          COALESCE(SUM(lineProfit), 0) as baseProfit
+        FROM order_items
+        WHERE orderId = ?
+      ''',
+        [orderId],
+      );
 
+      final subtotal = (sums.first['subtotal'] as num).toDouble();
+      final baseProfit = (sums.first['baseProfit'] as num).toDouble();
+
+      final d = discount < 0 ? 0 : discount;
+      final t = tip < 0 ? 0 : tip;
+      final tr = taxRate < 0 ? 0 : taxRate;
+
+      final taxAmount = subtotal * (tr / 100.0);
+      final totalFinal = subtotal - d + t + taxAmount;
+
+      // Ajuste de ganancia: descuento baja ganancia; propina la sube
+      final profitFinal = baseProfit - d + t;
+
+      // 3) Consecutivo de factura
+      await txn.insert('store_settings', {
+        'userId': userId,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      final sRows = await txn.query(
+        'store_settings',
+        where: 'userId = ?',
+        whereArgs: [userId],
+        limit: 1,
+      );
+      final s = sRows.first;
+
+      final prefix = (s['invoicePrefix'] as String?) ?? 'F-';
+      final nextNo = (s['nextInvoiceNumber'] as int?) ?? 1;
+      final pad = (s['invoicePadding'] as int?) ?? 5;
+
+      final invoiceNo = '$prefix${nextNo.toString().padLeft(pad, '0')}';
+
+      await txn.update(
+        'store_settings',
+        {'nextInvoiceNumber': nextNo + 1},
+        where: 'userId = ?',
+        whereArgs: [userId],
+      );
+
+      // 4) Guardar orden cerrada
       await txn.update(
         'orders',
         {
           'status': 'paid',
           'closedAt': DateTime.now().toIso8601String(),
-          // ✅ NUEVO
-          'paymentMethod': pm,
+          'paymentMethod': paymentMethod,
+          'invoiceNo': invoiceNo,
+          'subtotal': subtotal,
+          'discount': d,
+          'tip': t,
+          'taxRate': tr,
+          'taxAmount': taxAmount,
+          'total': totalFinal,
+          'profit': profitFinal,
         },
         where: 'id = ?',
         whereArgs: [orderId],
@@ -264,7 +315,7 @@ class SalesService {
     final sums = await txn.rawQuery(
       '''
       SELECT 
-        COALESCE(SUM(lineTotal), 0) as total,
+        COALESCE(SUM(lineTotal), 0) as subtotal,
         COALESCE(SUM(lineProfit), 0) as profit
       FROM order_items
       WHERE orderId = ?
@@ -272,12 +323,13 @@ class SalesService {
       [orderId],
     );
 
-    final total = (sums.first['total'] as num).toDouble();
+    final subtotal = (sums.first['subtotal'] as num).toDouble();
     final profit = (sums.first['profit'] as num).toDouble();
 
+    // Mientras está abierta: total=SUBTOTAL y profit=profit base
     await txn.update(
       'orders',
-      {'total': total, 'profit': profit},
+      {'subtotal': subtotal, 'total': subtotal, 'profit': profit},
       where: 'id = ?',
       whereArgs: [orderId],
     );

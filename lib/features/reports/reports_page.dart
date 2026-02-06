@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 import 'reports_models.dart';
 import 'reports_service.dart';
 
+// ✅ PARTE 6: Exportar Reporte PDF + Abrir factura desde historial
+import '../printing/report_pdf_service.dart';
+import '../printing/pdf_share.dart';
+import '../printing/receipt_preview_page.dart';
+
 class ReportsPage extends StatefulWidget {
   final int userId;
   const ReportsPage({super.key, required this.userId});
@@ -13,6 +18,9 @@ class ReportsPage extends StatefulWidget {
 
 class _ReportsPageState extends State<ReportsPage> {
   final _svc = ReportsService();
+
+  // ✅ PARTE 6: servicio para PDF de reporte
+  final _pdfReport = ReportPdfService();
 
   DateTime _from = DateTime.now().subtract(const Duration(days: 7));
   DateTime _to = DateTime.now();
@@ -118,6 +126,34 @@ class _ReportsPageState extends State<ReportsPage> {
     });
   }
 
+  // ✅ PARTE 6: Exportar reporte a PDF y compartir
+  Future<void> _exportPdf() async {
+    try {
+      final bytes = await _pdfReport.buildReportPdf(
+        title: 'Reporte de Ventas',
+        fromLabel: _d(_from),
+        toLabel: _d(_to),
+        totalSales: _totalSales,
+        totalProfit: _totalProfit,
+        cashSales: _cashSales,
+        cardSales: _cardSales,
+        virtualSales: _virtualSales,
+        topProducts: _topProducts,
+        topCategories: _topCategories,
+      );
+
+      await PdfShare.shareBytes(
+        bytes,
+        filename: 'reporte_${_d(_from)}_a_${_d(_to)}.pdf',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error exportando PDF: $e')));
+    }
+  }
+
   String _who(OrderHistoryRow o) {
     if (o.tableClientName == null || o.tableClientName!.trim().isEmpty) {
       return 'Sin mesa/cliente';
@@ -132,6 +168,12 @@ class _ReportsPageState extends State<ReportsPage> {
       appBar: AppBar(
         title: const Text('Reportes'),
         actions: [
+          // ✅ PARTE 6: Exportar PDF
+          IconButton(
+            onPressed: _loading ? null : _exportPdf,
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            tooltip: 'Exportar PDF',
+          ),
           IconButton(
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh),
@@ -387,6 +429,14 @@ class _ReportsPageState extends State<ReportsPage> {
                         title: Text(_who(o)),
                         subtitle: Text(
                           'Fecha: $dateOnly | Total: ${o.total.toStringAsFixed(2)} | Gan: ${o.profit.toStringAsFixed(2)}',
+                        ),
+                        // ✅ PARTE 6: tocar historial abre la factura
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ReceiptPreviewPage(orderId: o.orderId),
+                          ),
                         ),
                       );
                     }),

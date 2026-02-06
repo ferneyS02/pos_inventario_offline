@@ -13,6 +13,9 @@ import '../reports/reports_page.dart';
 // ✅ PARTE 5: Seguridad / Backup
 import '../settings/security_page.dart';
 
+// ✅ PARTE 7: Configuración del negocio (NIT, consecutivo, 80mm/A4, impuesto por defecto)
+import '../settings/business_settings_page.dart';
+
 class HomePage extends StatefulWidget {
   final int userId;
   final VoidCallback onLogout;
@@ -116,6 +119,9 @@ class _HomePageState extends State<HomePage> {
                   Text('Productos: $_prodCount'),
                   const SizedBox(height: 16),
 
+                  // ===========================
+                  // BOTONES PRINCIPALES
+                  // ===========================
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -188,9 +194,33 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
 
+                  // ✅ PARTE 7: Configuración del negocio
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                BusinessSettingsPage(userId: widget.userId),
+                          ),
+                        );
+                        // no es obligatorio recargar, pero lo dejamos por consistencia
+                        await _load();
+                      },
+                      icon: const Icon(Icons.storefront_outlined),
+                      label: const Text('Configuración del negocio'),
+                    ),
+                  ),
+
                   const SizedBox(height: 18),
                   const Divider(),
 
+                  // ===========================
+                  // CONFIGURACIÓN / GESTIÓN
+                  // ===========================
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
@@ -252,7 +282,7 @@ class _HomePageState extends State<HomePage> {
 
                   const SizedBox(height: 18),
                   const Text(
-                    '✅ Parte 5: Métodos de pago + Reportes por método + Seguridad/Backup + Recuperación offline.',
+                    '✅ Parte 7: Ticket 80mm/A4 + Consecutivo de factura + NIT/Dirección/Teléfono + Impuesto/Descuento/Propina.',
                     textAlign: TextAlign.center,
                   ),
                 ],

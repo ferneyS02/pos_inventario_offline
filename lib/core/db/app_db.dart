@@ -15,17 +15,19 @@ class AppDb {
 
     _db = await openDatabase(
       path,
-      version: 4, // ✅ SUBIMOS A 4
+      version: 5, // ✅ SUBIMOS A 5
       onCreate: (db, version) async {
         await _createV1(db);
         await _createV2(db);
         await _createV3(db);
         await _createV4(db);
+        await _createV5(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) await _createV2(db);
         if (oldVersion < 3) await _createV3(db);
         if (oldVersion < 4) await _createV4(db);
+        if (oldVersion < 5) await _createV5(db);
       },
     );
 
@@ -136,7 +138,6 @@ class AppDb {
   }
 
   static Future<void> _createV4(Database db) async {
-    // ✅ Códigos de recuperación
     await db.execute('''
       CREATE TABLE IF NOT EXISTS recovery_codes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,8 +147,6 @@ class AppDb {
       );
     ''');
 
-    // ✅ Método de pago en orders (ALTER si ya existe tabla)
-    // SQLite no tiene "ADD COLUMN IF NOT EXISTS", lo controlamos con try/catch
     try {
       await db.execute("ALTER TABLE orders ADD COLUMN paymentMethod TEXT;");
     } catch (_) {}
@@ -156,10 +155,64 @@ class AppDb {
       'CREATE INDEX IF NOT EXISTS idx_recovery_user_used ON recovery_codes(userId, usedAt);',
     );
 
-    // Si hay órdenes pagadas viejas sin método, las marcamos como 'cash'
     try {
       await db.execute(
         "UPDATE orders SET paymentMethod='cash' WHERE status='paid' AND (paymentMethod IS NULL OR paymentMethod='');",
+      );
+    } catch (_) {}
+  }
+
+  static Future<void> _createV5(Database db) async {
+    // ✅ Configuración por negocio/usuario
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS store_settings (
+        userId INTEGER PRIMARY KEY,
+        nit TEXT,
+        address TEXT,
+        phone TEXT,
+        invoicePrefix TEXT NOT NULL DEFAULT 'F-',
+        nextInvoiceNumber INTEGER NOT NULL DEFAULT 1,
+        invoicePadding INTEGER NOT NULL DEFAULT 5,
+        receiptFormat TEXT NOT NULL DEFAULT '80mm', -- '80mm' | 'a4'
+        footerText TEXT,
+        taxRateDefault REAL NOT NULL DEFAULT 0
+      );
+    ''');
+
+    // ✅ Campos nuevos en orders
+    try {
+      await db.execute("ALTER TABLE orders ADD COLUMN invoiceNo TEXT;");
+    } catch (_) {}
+    try {
+      await db.execute(
+        "ALTER TABLE orders ADD COLUMN subtotal REAL NOT NULL DEFAULT 0;",
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        "ALTER TABLE orders ADD COLUMN discount REAL NOT NULL DEFAULT 0;",
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        "ALTER TABLE orders ADD COLUMN tip REAL NOT NULL DEFAULT 0;",
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        "ALTER TABLE orders ADD COLUMN taxRate REAL NOT NULL DEFAULT 0;",
+      );
+    } catch (_) {}
+    try {
+      await db.execute(
+        "ALTER TABLE orders ADD COLUMN taxAmount REAL NOT NULL DEFAULT 0;",
+      );
+    } catch (_) {}
+
+    // Ajuste: para órdenes viejas, subtotal = total si está en 0
+    try {
+      await db.execute(
+        "UPDATE orders SET subtotal = total WHERE subtotal IS NULL OR subtotal = 0;",
       );
     } catch (_) {}
   }

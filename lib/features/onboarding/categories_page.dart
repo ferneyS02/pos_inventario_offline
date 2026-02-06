@@ -127,7 +127,8 @@ class _CategoriesPageState extends State<CategoriesPage> {
                         ? const Center(child: Text('Aún no hay categorías'))
                         : ListView.separated(
                             itemCount: _items.length,
-                            separatorBuilder: (_, __) =>
+                            // ✅ FIX: no uses "__" (dos guiones bajos). Solo "_".
+                            separatorBuilder: (_, _) =>
                                 const Divider(height: 1),
                             itemBuilder: (_, i) {
                               final c = _items[i];
